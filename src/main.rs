@@ -1,0 +1,148 @@
+#[derive(Copy, Clone, Debug)]
+pub enum Direction {
+    Rest = 0,
+    East = 1,
+    North = 2,
+    West = 3,
+    South = 4,
+    NorthEast = 5,
+    NorthWest = 6,
+    SouthWest = 7,
+    SouthEast = 8,
+}
+
+pub fn get_direction_coordinates(i: &Direction) -> (isize, isize) {
+    match i {
+        Direction::Rest => (0, 0),
+        Direction::East => (1, 0),
+        Direction::North => (0, -1),
+        Direction::West => (-1, 0),
+        Direction::South => (0, 1),
+        Direction::NorthEast => (1, -1),
+        Direction::NorthWest => (-1, -1),
+        Direction::SouthWest => (-1, 1),
+        Direction::SouthEast => (1, 1),
+    }
+}
+
+pub fn get_index(i: &Direction) -> usize {
+    *i as usize
+}
+
+pub fn get_direction(i: usize) -> Direction {
+    match i {
+        0 => Direction::Rest,
+        1 => Direction::East,
+        2 => Direction::North,
+        3 => Direction::West,
+        4 => Direction::South,
+        5 => Direction::NorthEast,
+        6 => Direction::NorthWest,
+        7 => Direction::SouthWest,
+        8 => Direction::SouthEast,
+        _ => Direction::Rest,
+    }
+}
+
+pub fn get_weight(i: &Direction) -> f32 {
+    match i {
+        Direction::Rest => 4.0/9.0,
+        Direction::East => 1.0/9.0,
+        Direction::West => 1.0/9.0,
+        Direction::North => 1.0/9.0,
+        Direction::South => 1.0/9.0,
+        Direction::NorthEast => 1.0/36.0,
+        Direction::NorthWest => 1.0/36.0,
+        Direction::SouthWest => 1.0/36.0,
+        Direction::SouthEast => 1.0/36.0,
+    }
+}
+
+struct Grid {
+    //I am thinking to put the entire data in one contagious buffer for better caching and prefetching and optimization.
+    //so i spans 0->8, it will give us (dx, dy) which is the direction pair.
+    //we can calculate the source_cell using => i * width * height + (row * width) + col
+    //Once we have located source cell we can change it's value in direction i, like:
+    //target_cell = i * width * height + (target_row * width) + target_col
+    //where target_row = row + dy, target_col = col + dx
+    //Just have to make sure to not calculate the target_row and target_col are in bound or not
+    buffer_a: Vec<f32>,
+    buffer_b: Vec<f32>,
+    height: usize,
+    width: usize,
+}
+
+impl Grid {
+    pub fn new(height: usize, width: usize) -> Self {
+        Self {
+            buffer_a: vec![0.0; height * width * 9],
+            buffer_b: vec![0.0; height * width * 9],
+            height,
+            width,
+        }
+    }
+    fn index(&self, dir: &Direction, row: usize, col: usize) -> Option<usize> {
+        let (dx, dy) = get_direction_coordinates(dir);
+        let target_row: isize = row as isize + dy;
+        let target_col: isize = col as isize + dx;
+        if target_row < 0 || target_col < 0 || target_col >= self.width as isize || target_row >= self.height as isize {
+            return None;
+        }
+        Some(get_index(dir) * self.width * self.height + (target_row as usize) * self.width + target_col as usize)
+    }
+    fn init(&mut self) {
+        for row in 0..self.height {
+            for col in 0..self.width {
+                for i in 0..9 {
+                    let index: usize = i * self.width * self.height + row * self.width + col;
+                    self.buffer_a[index] = get_weight(&get_direction(i));
+                    self.buffer_b[index] = get_weight(&get_direction(i));
+                }
+            }
+        }
+    }
+    fn moments(&self, row: usize, col: usize) -> (f32, (f32, f32)){
+        let mut density: f32 = 0.0;
+        //loop isn't auto vectorized btw
+        for i in 0..9 {
+            let index: usize = i * self.width * self.height + row * self.width + col;
+            density += self.buffer_a[index];
+        }
+        let (mut ux, mut uy): (f32, f32) = (0.0, 0.0);
+        for i in 0..9 {
+            let index: usize = i * self.width * self.height + row * self.width + col;
+            let (dx, dy): (isize, isize) = get_direction_coordinates(&get_direction(i));
+            ux += self.buffer_a[index] * (dx as f32);
+            uy += self.buffer_a[index] * (dy as f32);
+        }
+        ux /= density;
+        uy /= density;
+        (density, (ux, uy))
+    }
+
+    fn equilibrium(&self, moments: (f32, (f32, f32)), dir: &Direction) -> f32 {
+        let (dx, dy): (isize, isize) = get_direction_coordinates(dir);
+        let (p, (ux, uy)) = moments;
+        let dot: f32 = (dx as f32) * ux + (dy as f32) * uy;
+        get_weight(dir) * p * (1.0 + 3.0 * dot + 4.5 * dot * dot - 1.5 * (ux * ux + uy * uy))
+    }
+}
+
+fn main() {
+    let mut grid: Grid = Grid::new(3, 3);
+    let (row, col): (usize, usize) = (1, 2);
+    let dir: Direction = Direction::SouthWest;
+    let res: Option<usize> = grid.index(&dir, row, col);
+    match res {
+        Some(a) => {
+            println!("{}", a);
+            grid.init();
+            println!("weights: {}", grid.buffer_a[a]);
+            let moments = grid.moments(row, col);
+            let (p, (ux, uy)) = moments;
+            println!("{}, {}, {}", p, ux, uy);
+            println!("Equilibrium: {}", grid.equilibrium(moments, &dir));
+        },
+        None => println!("Out of bounds"),
+    };
+}
