@@ -70,17 +70,20 @@ struct Grid {
     buffer_b: Vec<f32>,
     height: usize,
     width: usize,
+    tau: f32,
 }
 
 impl Grid {
-    pub fn new(height: usize, width: usize) -> Self {
+    pub fn new(height: usize, width: usize, tau: f32) -> Self {
         Self {
             buffer_a: vec![0.0; height * width * 9],
             buffer_b: vec![0.0; height * width * 9],
             height,
             width,
+            tau,
         }
     }
+
     fn index(&self, dir: &Direction, row: usize, col: usize) -> Option<usize> {
         let (dx, dy) = get_direction_coordinates(dir);
         let target_row: isize = row as isize + dy;
@@ -90,6 +93,7 @@ impl Grid {
         }
         Some(get_index(dir) * self.width * self.height + (target_row as usize) * self.width + target_col as usize)
     }
+
     fn init(&mut self) {
         for row in 0..self.height {
             for col in 0..self.width {
@@ -101,12 +105,13 @@ impl Grid {
             }
         }
     }
+
     fn moments(&self, row: usize, col: usize) -> (f32, (f32, f32)){
-        let mut density: f32 = 0.0;
+        let mut p: f32 = 0.0;
         //loop isn't auto vectorized btw
         for i in 0..9 {
             let index: usize = i * self.width * self.height + row * self.width + col;
-            density += self.buffer_a[index];
+            p += self.buffer_a[index];
         }
         let (mut ux, mut uy): (f32, f32) = (0.0, 0.0);
         for i in 0..9 {
@@ -115,9 +120,9 @@ impl Grid {
             ux += self.buffer_a[index] * (dx as f32);
             uy += self.buffer_a[index] * (dy as f32);
         }
-        ux /= density;
-        uy /= density;
-        (density, (ux, uy))
+        ux /= p;
+        uy /= p;
+        (p, (ux, uy))
     }
 
     fn equilibrium(&self, moments: (f32, (f32, f32)), dir: &Direction) -> f32 {
@@ -126,23 +131,50 @@ impl Grid {
         let dot: f32 = (dx as f32) * ux + (dy as f32) * uy;
         get_weight(dir) * p * (1.0 + 3.0 * dot + 4.5 * dot * dot - 1.5 * (ux * ux + uy * uy))
     }
+
+    fn collision(&mut self, row: usize, col: usize) {
+        let moments = self.moments(row, col);
+        for i in 0..9 {
+            let index: usize = i * self.width * self.height + row * self.width + col;
+            let eq: f32 = self.equilibrium(moments, &get_direction(i));
+            self.buffer_a[index] -= (1.0/self.tau) * (self.buffer_a[index] - eq);
+        }
+    }
+
+    fn streaming(&mut self) {
+        for row in 0..self.height {
+            for col in 0..self.width {
+                for i in 0..9 {
+                    let source_idx: usize = i * self.width * self.height + row * self.width + col;
+                    match self.index(&get_direction(i), row, col) {
+                        Some(target_idx) => {
+                            self.buffer_b[target_idx] = self.buffer_a[source_idx];
+                        },
+                        None => continue,
+                    };
+                }
+            }
+        }
+        std::mem::swap(&mut self.buffer_a, &mut self.buffer_b);
+    }
 }
 
 fn main() {
-    let mut grid: Grid = Grid::new(3, 3);
-    let (row, col): (usize, usize) = (1, 2);
-    let dir: Direction = Direction::SouthWest;
-    let res: Option<usize> = grid.index(&dir, row, col);
-    match res {
-        Some(a) => {
-            println!("{}", a);
-            grid.init();
-            println!("weights: {}", grid.buffer_a[a]);
-            let moments = grid.moments(row, col);
-            let (p, (ux, uy)) = moments;
-            println!("{}, {}, {}", p, ux, uy);
-            println!("Equilibrium: {}", grid.equilibrium(moments, &dir));
-        },
-        None => println!("Out of bounds"),
-    };
+    let mut grid: Grid = Grid::new(3, 3, 0.1);
+    grid.init();
+    let iterations: usize = 100;
+    for _ in 0..iterations {
+        for row in 0..grid.height {
+            for col in 0..grid.width {
+                grid.collision(row, col);
+            }
+        }
+        grid.streaming();
+    }
+    for row in 0..grid.height {
+        for col in 0..grid.width {
+            let (p, (ux, uy)) = grid.moments(row, col);
+            println!("({}, {}, {})", p, ux, uy);
+        }
+    }
 }
