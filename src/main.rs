@@ -85,16 +85,18 @@ struct Grid {
     height: usize,
     width: usize,
     tau: f32,
+    u: f32,
 }
 
 impl Grid {
-    pub fn new(height: usize, width: usize, tau: f32) -> Self {
+    pub fn new(height: usize, width: usize, tau: f32, u: f32) -> Self {
         Self {
             buffer_a: vec![0.0; height * width * 9],
             buffer_b: vec![0.0; height * width * 9],
             height,
             width,
             tau,
+            u,
         }
     }
 
@@ -165,7 +167,11 @@ impl Grid {
                         None => {
                             let j: usize = get_index(&get_opp_direction(&get_direction(i)));
                             let opposite_idx: usize = j * self.width * self.height + row * self.width + col;
-                            self.buffer_b[opposite_idx] = self.buffer_a[source_idx];
+                            let mut correction: f32 = 0.0;
+                            if row == 0 && (i == 2 || i == 5 || i == 6) {
+                                correction += 6.0 * self.moments(row, col).0 * get_weight(&get_direction(i)) * self.u * (get_direction_coordinates(&get_direction(i)).0 as f32);
+                            }
+                            self.buffer_b[opposite_idx] = self.buffer_a[source_idx] - correction;
                         },
                     };
                 }
@@ -176,9 +182,16 @@ impl Grid {
 }
 
 fn main() {
-    let mut grid: Grid = Grid::new(3, 3, 0.1);
+    let n: usize = 129;
+    let u_lid: f32 = 0.1;
+    let re: f32 = 100.0;
+    let nu: f32 = u_lid * ((n - 1) as f32) / re;
+    let tau: f32 = 3.0 * nu + 0.5;
+
+    let mut grid: Grid = Grid::new(n, n, tau, u_lid);
     grid.init();
-    let iterations: usize = 100;
+
+    let iterations: usize = 20000;
     for _ in 0..iterations {
         for row in 0..grid.height {
             for col in 0..grid.width {
@@ -187,10 +200,33 @@ fn main() {
         }
         grid.streaming();
     }
+
+    // 1. Sanity check: NaN / blowup scan
+    let mut max_rho_dev: f32 = 0.0;
+    let mut max_speed: f32 = 0.0;
+    let mut found_nan = false;
+
     for row in 0..grid.height {
         for col in 0..grid.width {
             let (p, (ux, uy)) = grid.moments(row, col);
-            println!("({}, {}, {})", p, ux, uy);
+            if p.is_nan() || ux.is_nan() || uy.is_nan() {
+                found_nan = true;
+            }
+            let dev = (p - 1.0).abs();
+            if dev > max_rho_dev { max_rho_dev = dev; }
+            let speed = (ux * ux + uy * uy).sqrt();
+            if speed > max_speed { max_speed = speed; }
         }
+    }
+    println!("NaN present: {}", found_nan);
+    println!("Max density deviation from 1.0: {}", max_rho_dev);
+    println!("Max speed: {}", max_speed);
+
+    // 2. Centerline profile: ux along the vertical line at col = width/2
+    let mid_col = grid.width / 2;
+    println!("\nCenterline u-velocity (row, ux):");
+    for row in 0..grid.height {
+        let (_, (ux, _)) = grid.moments(row, mid_col);
+        println!("{}, {}", row, ux);
     }
 }
