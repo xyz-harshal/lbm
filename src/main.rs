@@ -58,6 +58,20 @@ pub fn get_weight(i: &Direction) -> f32 {
     }
 }
 
+pub fn get_opp_direction(i: &Direction) -> Direction {
+    match i {
+        Direction::Rest => Direction::Rest,
+        Direction::East => Direction::West,
+        Direction::West => Direction::East,
+        Direction::North => Direction::South,
+        Direction::South => Direction::North,
+        Direction::NorthEast => Direction::SouthWest,
+        Direction::NorthWest => Direction::SouthEast,
+        Direction::SouthWest => Direction::NorthEast,
+        Direction::SouthEast => Direction::NorthWest,
+    }
+}
+
 struct Grid {
     //I am thinking to put the entire data in one contagious buffer for better caching and prefetching and optimization.
     //so i spans 0->8, it will give us (dx, dy) which is the direction pair.
@@ -147,10 +161,12 @@ impl Grid {
                 for i in 0..9 {
                     let source_idx: usize = i * self.width * self.height + row * self.width + col;
                     match self.index(&get_direction(i), row, col) {
-                        Some(target_idx) => {
-                            self.buffer_b[target_idx] = self.buffer_a[source_idx];
+                        Some(target_idx) => self.buffer_b[target_idx] = self.buffer_a[source_idx],
+                        None => {
+                            let j: usize = get_index(&get_opp_direction(&get_direction(i)));
+                            let opposite_idx: usize = j * self.width * self.height + row * self.width + col;
+                            self.buffer_b[opposite_idx] = self.buffer_a[source_idx];
                         },
-                        None => continue,
                     };
                 }
             }
